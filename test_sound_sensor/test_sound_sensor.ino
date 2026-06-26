@@ -15,14 +15,14 @@ void loop() {
   int valorAnalogico = analogRead(pinAO);
   int valorDigital = digitalRead(pinDO);
 
-  bool sonidoDetectado = valorAnalogico > umbral;
+  //bool sonidoDetectado = valorAnalogico > umbral;
 
   Serial.print("AO: ");
   Serial.print(valorAnalogico);
   Serial.print("\tDO: ");
   Serial.print(valorDigital);
-  Serial.print("\tLED: ");
-  Serial.println(sonidoDetectado ? "ON" : "OFF");
+  //Serial.print("\tLED: ");
+  Serial.println(valorDigital ? "ON" : "OFF");
 
-  delay(100);
+  //delay(100);
 }
