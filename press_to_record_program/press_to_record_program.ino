@@ -1,5 +1,6 @@
 #include <iot-sound-sensor_inferencing.h>
 
+
 // 1. INCLUIR LA LIBRERÍA DE INFERENCIA EXPORTADA DE EDGE IMPULSE
 // Reemplaza "nombre_de_tu_proyecto" por el nombre exacto de tu archivo zip
 #include <driver/adc.h>
@@ -114,14 +115,18 @@ void ejecutarInferencia() {
     bool patronDetectado = false;
     float nivelDeCerteza = 0.0;
 
+
     for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-        if (strcmp(result.classification[ix].label, "knock_knock") == 0) {
+        if (strcmp(result.classification[ix].label, "knock") == 0) {
             nivelDeCerteza = result.classification[ix].value;
-            if (nivelDeCerteza > 0.85) {
+            if (nivelDeCerteza > 0.5) {
                 patronDetectado = true;
             }
         }
     }
+
+    Serial.print("Clase detectada: ");
+    if(!patronDetectado) Serial.println("silence"); else Serial.println("knock");
 
     // 4. Veredicto final impreso por Serial
     Serial.println("--------------- VERDICTO ---------------");
