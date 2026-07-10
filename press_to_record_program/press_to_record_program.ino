@@ -1,14 +1,15 @@
-#include <iot-sound-sensor_inferencing.h>
-
 
 // 1. INCLUIR LA LIBRERÍA DE INFERENCIA EXPORTADA DE EDGE IMPULSE
-// Reemplaza "nombre_de_tu_proyecto" por el nombre exacto de tu archivo zip
+#include <iot-sound-sensor_inferencing.h>
+
 #include <driver/adc.h>
 
 // ---------- Configuración de Hardware ----------
 #define MIC_ADC_CHANNEL     ADC1_CHANNEL_6   // GPIO34
 #define BUTTON_PIN          18
 #define LED_PIN             2
+#define RED_LED             12
+#define GREEN_LED           14
 
 // ---------- Configuración del Modelo (Nativo de Edge Impulse) ----------
 // EI_CLASSIFIER_RAW_SAMPLE_COUNT y EI_CLASSIFIER_FREQUENCY vienen en la librería (ej. 16000 y 16000Hz)
@@ -34,6 +35,12 @@ void setup() {
     pinMode(BUTTON_PIN, INPUT_PULLUP);
     pinMode(LED_PIN, OUTPUT);
     digitalWrite(LED_PIN, LOW);
+
+    pinMode(RED_LED, OUTPUT);
+    pinMode(GREEN_LED, OUTPUT);
+
+    digitalWrite(RED_LED, LOW);
+    digitalWrite(GREEN_LED, LOW);
 
     // Configuración del ADC (Exactamente igual que en la recolección de datos)
     adc1_config_width(ADC_WIDTH_BIT_12);
@@ -117,7 +124,7 @@ void ejecutarInferencia() {
 
 
     for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-        if (strcmp(result.classification[ix].label, "knock") == 0) {
+        if (strcmp(result.classification[ix].label, "knock_knock") == 0) {
             nivelDeCerteza = result.classification[ix].value;
             if (nivelDeCerteza > 0.5) {
                 patronDetectado = true;
@@ -133,9 +140,17 @@ void ejecutarInferencia() {
     if (patronDetectado) {
         Serial.printf(" CONFIRMADO (Certeza: %.2f%%)\n", nivelDeCerteza * 100.0);
         Serial.println(" ACCESO CONCEDIDO: Permiso Otorgado.");
+        
+        digitalWrite(GREEN_LED, HIGH);
     } else {
         Serial.printf(" NO RECONOCIDO (Certeza del patrón: %.2f%%)\n", nivelDeCerteza * 100.0);
         Serial.println(" ACCESO DENEGADO: Intenta de nuevo.");
+
+        digitalWrite(RED_LED, HIGH);
     }
     Serial.println("----------------------------------------");
+
+    delay(2000);
+    digitalWrite(RED_LED, LOW);
+    digitalWrite(GREEN_LED, LOW);
 }
