@@ -4,6 +4,11 @@
 
 #include <driver/adc.h>
 
+#include <PubSubClient.h>
+#include <WiFi.h>
+#include <LittleFS.h>
+#include <ArduinoJson.h>
+
 // ---------- Configuración de Hardware ----------
 #define MIC_ADC_CHANNEL     ADC1_CHANNEL_6   // GPIO34
 #define BUTTON_PIN          18
@@ -23,12 +28,27 @@ bool lastButtonState = HIGH;
 unsigned long lastDebounceTime = 0;
 const unsigned long DEBOUNCE_MS = 50;
 
+// --- Credential buffers ---
+char wifissid_buffer[32];
+char wifipass_buffer[64];
+char mqttsv_buffer[64];
+
+const char* WIFISSID     = wifissid_buffer;
+const char* WIFIPASSWORD = wifipass_buffer;
+const char* MQTTSERVER   = mqttsv_buffer;
+const int MQTTPORT = 1883;
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient);
+
+// TOPICOS DE MQTT
+const char* TOPIC_ACCESS = "iot/access";
+
 // Declaración de funciones
 void capturarAudio();
 void ejecutarInferencia();
 
 void setup() {
-    // Volvemos a 115200 baudios ya que solo imprimiremos texto humano, no ráfagas de datos
     Serial.begin(115200);
     delay(500);
 
@@ -46,11 +66,89 @@ void setup() {
     adc1_config_width(ADC_WIDTH_BIT_12);
     adc1_config_channel_atten(MIC_ADC_CHANNEL, ADC_ATTEN_DB_11);
 
+    if(loadCredentials()){
+        // Conexión WiFi
+        Serial.print("Conectando a la red WiFi: ");
+        Serial.println(WIFISSID);
+        
+        WiFi.begin(WIFISSID, WIFIPASSWORD);
+        while (WiFi.status() != WL_CONNECTED) {
+        delay(500);
+        Serial.print("."); // Efecto visual de carga
+        }
+    }
+    Serial.printf("\n[WiFi OK] IP: %s\n", WiFi.localIP().toString().c_str());
+    WiFi.setSleep(false);
+
+    Serial.println("[ENV] Configurando entorno estándar para Mosquitto Local...");
+    mqttClient.setClient(wifiClient);
+    mqttClient.setServer(MQTTSERVER, MQTTPORT);
+
     Serial.println("\n=== Sistema de Control de Acceso por Audio Listo ===");
     Serial.println("Estado: [ESPERANDO] Presiona el botón para realizar el patrón de golpes...");
+
+    reconnect();
 }
 
+
+
+bool loadCredentials() {
+    /* Function that loads WiFi and MQTT credentials from a JSON*/
+
+    /* Initialization of LittleFS */
+    if (!LittleFS.begin(true)) { 
+        Serial.println("[ERROR] LittleFS could not be initialized"); 
+        return false; 
+    }
+
+    /* Opening credential file */
+    File f = LittleFS.open("/config.json", "r");
+    if (!f) { 
+        Serial.println("[ERROR] config.json not found");
+        return false; 
+    }
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, f);
+    f.close();
+
+    if (err) { 
+        Serial.println("[ERROR] invalid JSON"); 
+        return false; 
+    }
+
+    /* Parsing of credentials */
+    strlcpy(wifissid_buffer,    doc["ssid"]          | "", sizeof(wifissid_buffer));
+    strlcpy(wifipass_buffer,    doc["password"]       | "", sizeof(wifipass_buffer));
+    strlcpy(mqttsv_buffer, doc["mosquitto_server"] , sizeof(mqttsv_buffer));
+
+    Serial.println("[OK] Credentials loaded successfully.");
+    return true;
+}
+
+
+// Función para conectar/reconectar a MQTT
+void reconnect() {
+  /* Function that connects to MQTT broker */
+
+  while (!mqttClient.connected()) {
+    Serial.print("Connecting MQTT... ");
+    if (mqttClient.connect("ESP32Client")) {
+      Serial.println("[OK] MQTT Connected");
+    } else {
+      Serial.printf("[FAILED] state=%d, retrying...\n", mqttClient.state());
+      delay(5000);
+    }
+  }
+}
+
+
 void loop() {
+
+    if (!mqttClient.connected()) {
+        reconnect();
+    }
+    mqttClient.loop();
+
     bool currentButtonState = digitalRead(BUTTON_PIN);
 
     // Flanco de bajada (botón presionado)
@@ -120,34 +218,63 @@ void ejecutarInferencia() {
 
     // 3. Evaluar los resultados obtenidos
     bool patronDetectado = false;
-    float nivelDeCerteza = 0.0;
+    float maxCerteza = -1.0;
+    float certezaPatronCorrecto = 0.0;
+    const char* claseDetectada;
 
 
-    for (size_t ix = 0; ix < EI_CLASSIFIER_LABEL_COUNT; ix++) {
-        if (strcmp(result.classification[ix].label, "knock_knock") == 0) {
-            nivelDeCerteza = result.classification[ix].value;
-            if (nivelDeCerteza > 0.5) {
-                patronDetectado = true;
-            }
+    for (size_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
+
+        const char* label = result.classification[i].label;
+        float nivelDeCerteza = result.classification[i].value;
+        Serial.print(label);
+        Serial.printf(" = %.2f ", nivelDeCerteza);
+
+        if (strcmp(label, "knock_knock") == 0) {
+            certezaPatronCorrecto = nivelDeCerteza;
+        }
+        if(nivelDeCerteza > maxCerteza){
+            claseDetectada = label;
+            maxCerteza = nivelDeCerteza;
         }
     }
 
-    Serial.print("Clase detectada: ");
-    if(!patronDetectado) Serial.println("silence"); else Serial.println("knock");
+    if(certezaPatronCorrecto < maxCerteza) patronDetectado = false;
+    else patronDetectado = true;
 
-    // 4. Veredicto final impreso por Serial
+    Serial.print("Clase detectada = ");
+    Serial.print(claseDetectada);
+    Serial.printf(" con %.2f%%\n", maxCerteza * 100);
+    Serial.printf("Knock Knock con %.2f%%\n", certezaPatronCorrecto * 100);
+    
+
+
+
+    // 4. Veredicto final impreso por Serial y enviado por MQTT
     Serial.println("--------------- VERDICTO ---------------");
+    Serial.print("CLASE RECONOCIDA: ");
+    Serial.println(claseDetectada);
+    char msg[100];
     if (patronDetectado) {
-        Serial.printf(" CONFIRMADO (Certeza: %.2f%%)\n", nivelDeCerteza * 100.0);
+        Serial.printf(" CONFIRMADO (Certeza: %.2f%%)\n", maxCerteza * 100.0);
         Serial.println(" ACCESO CONCEDIDO: Permiso Otorgado.");
         
         digitalWrite(GREEN_LED, HIGH);
+        
     } else {
-        Serial.printf(" NO RECONOCIDO (Certeza del patrón: %.2f%%)\n", nivelDeCerteza * 100.0);
+        Serial.printf(" NO RECONOCIDO (Certeza del patrón: %.2f%%)\n", maxCerteza * 100.0);
         Serial.println(" ACCESO DENEGADO: Intenta de nuevo.");
 
         digitalWrite(RED_LED, HIGH);
     }
+
+    sprintf(msg, "{\"access\": %d}", patronDetectado);
+    if(mqttClient.publish("iot/access", msg)){
+        Serial.println("[ÉXITO] Mensaje enviado correctamente");
+    } else {
+        Serial.println("[ERROR] No se pudo enviar el mensaje");
+    }
+
     Serial.println("----------------------------------------");
 
     delay(2000);
