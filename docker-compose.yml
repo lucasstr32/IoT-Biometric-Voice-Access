@@ -1,0 +1,60 @@
+services:
+  mqtt:
+    image: "eclipse-mosquitto:latest"
+    container_name: mosquitto
+    restart: unless-stopped
+    volumes:
+      # Mosquitto suele requerir que la config sea un archivo local, pero data e instalación van a volumen
+      - ./mosquitto/config:/mosquitto/config
+      - mosquitto_data:/mosquitto/data
+      - mosquitto_log:/mosquitto/log
+    ports:
+      - "1883:1883"
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+
+  influxdb:
+    image: influxdb:2.7
+    container_name: influxdb
+    restart: unless-stopped
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+
+  nodered:
+    image: nodered/node-red:latest
+    container_name: node-red
+    restart: unless-stopped
+    environment:
+      - TZ=America/Argentina/Buenos_Aires
+    ports:
+      - "1880:1880"
+    volumes:
+      - nodered_data:/data
+      - /dev/snd:/dev/snd
+    depends_on:
+      - mqtt
+      - influxdb
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - influxdb
+
+# Definición de los volúmenes gestionados por Docker (adiós problemas de permisos)
+volumes:
+  mosquitto_data:
+  mosquitto_log:
+  influxdb_data:
+  nodered_data:
+  grafana_data:
