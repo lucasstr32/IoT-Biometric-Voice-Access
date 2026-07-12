@@ -87,7 +87,7 @@ void setup() {
                 digitalWrite(LED_PIN, ledState);
                 Serial.print("."); 
             }
-            yield(); /
+            yield(); 
         }
         digitalWrite(LED_PIN, LOW);
     }
@@ -256,10 +256,10 @@ void runInference() {
     Serial.printf("Knock Knock with %.2f%%\n", patternConfidence * 100);
     
 
-    printTelemetry()
+    printTelemetry(detectedClass, maxConfidence, patternDetected);
 }
 
-void printTelemetry(){
+void printTelemetry(const char* detectedClass, float maxConfidence, bool patternDetected){
 
     Serial.println("--------------- RESULT ---------------");
     Serial.print("DETECTED CLASS: ");
@@ -273,7 +273,7 @@ void printTelemetry(){
         
     } else {
         Serial.printf(" NOT RECOGNIZED (Pattern confidence: %.2f%%)\n", maxConfidence * 100.0);
-        Serial.println(" --- DENIED ACCESS --- ")");
+        Serial.println(" --- DENIED ACCESS --- ");
 
         digitalWrite(RED_LED, HIGH);
     }
