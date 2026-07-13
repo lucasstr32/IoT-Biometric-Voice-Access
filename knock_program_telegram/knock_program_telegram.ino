@@ -1,10 +1,11 @@
 #include <iot-sound-sensor_inferencing.h> // EDGE IMPULSE LIBRARY
 
 #include <driver/adc.h>
-#include <PubSubClient.h>
 #include <WiFi.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <WiFiClientSecure.h>
+#include <UniversalTelegramBot.h>
 
 // ---------- HARDWARE CONFIG ----------
 #define ADC_CHANNEL     ADC1_CHANNEL_6   // GPIO34
@@ -25,28 +26,26 @@ bool lastButtonState = HIGH;
 unsigned long lastDebounceTime = 0;
 const unsigned long DEBOUNCE_MS = 50;
 
-// --- CREDENTIAL VARIABLES (WiFi, MQTT) ---
-// Credential buffers 
+
 char wifissid_buffer[32];
 char wifipass_buffer[64];
-char mqttsv_buffer[64];
+char telegramtoken_buffer[64];
+char telegramchatid_buffer[32];
 
-const char* WIFISSID     = wifissid_buffer;
-const char* WIFIPASSWORD = wifipass_buffer;
-const char* MQTTSERVER   = mqttsv_buffer;
-const int MQTTPORT = 1883;
+const char* WIFISSID        = wifissid_buffer;
+const char* WIFIPASSWORD    = wifipass_buffer;
+const char* TELEGRAMTOKEN   = telegramtoken_buffer;
+const char* TELEGRAMCHATID  = telegramchatid_buffer;
 
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
 
-// MQTT Topic
-const char* TOPIC_ACCESS = "iot/access";
+WiFiClientSecure wifiClient;
+UniversalTelegramBot bot(telegramtoken_buffer, wifiClient);
+
 
 // --- FUNCTION DECLARATIONS ---
 void capturarAudio();
 void ejecutarInferencia();
 bool loadCredentials();
-void reconnect();
 
 
 void setup() {
@@ -73,7 +72,7 @@ void setup() {
         Serial.println(WIFISSID);
         
         WiFi.begin(WIFISSID, WIFIPASSWORD);
-        
+
         unsigned long lastBlinkTime = 0;
         bool ledState = LOW;
         
@@ -95,13 +94,12 @@ void setup() {
     Serial.printf("\n[WiFi OK] IP: %s\n", WiFi.localIP().toString().c_str());
     WiFi.setSleep(false);
 
-    Serial.println("[ENV] Configuring Mosquitto...");
-    mqttClient.setClient(wifiClient);
-    mqttClient.setServer(MQTTSERVER, MQTTPORT);
+    wifiClient.setInsecure(); // Lo más conveniente sería usar un certificado
 
     Serial.println("\n=== Audio Control READY ===");
 
-    reconnect();
+    Serial.println(TELEGRAMTOKEN);
+    Serial.println(TELEGRAMCHATID);
 }
 
 
@@ -131,52 +129,17 @@ bool loadCredentials() {
     }
 
     /* Parsing of credentials */
-    strlcpy(wifissid_buffer,    doc["ssid"]          | "", sizeof(wifissid_buffer));
-    strlcpy(wifipass_buffer,    doc["password"]       | "", sizeof(wifipass_buffer));
-    strlcpy(mqttsv_buffer, doc["mosquitto_server"] , sizeof(mqttsv_buffer));
+    strlcpy(wifissid_buffer, doc["ssid"] | "", sizeof(wifissid_buffer));
+    strlcpy(wifipass_buffer, doc["password"] | "", sizeof(wifipass_buffer));
+    strlcpy(telegramtoken_buffer, doc["telegram_token"] | "", sizeof(telegramtoken_buffer));
+    strlcpy(telegramchatid_buffer, doc["telegram_chatid"] | "", sizeof(telegramchatid_buffer));
 
+    bot.updateToken(TELEGRAMTOKEN);
+    
     Serial.println("[ENV OK] Credentials loaded successfully.");
     return true;
 }
 
-
-
-void reconnect() {
-    /* Function to reconnect to Mosquitto */
-
-    unsigned long lastBlinkTime = 0;
-    unsigned long lastRetryTime = 0;
-    bool ledState = LOW;
-    bool firstAttempt = true;
-
-    while (!mqttClient.connected()) {
-        unsigned long currentMillis = millis();
-
-        // LED twinkles every 500ms
-        if (currentMillis - lastBlinkTime >= 500) {
-        lastBlinkTime = currentMillis;
-        ledState = !ledState;
-        digitalWrite(LED_PIN, ledState);
-        }
-
-        // Connect directly if first time, every 5s if not
-        if (firstAttempt || (currentMillis - lastRetryTime >= 5000)) {
-            firstAttempt = false;
-            lastRetryTime = currentMillis;
-            
-            Serial.print("Connecting MQTT... ");
-            if (mqttClient.connect("ESP32Client")) {
-                Serial.println("[ENV OK] MQTT Connected");
-                digitalWrite(LED_PIN, LOW); 
-            } else {
-                Serial.printf("[FAILED] state=%d, retrying in 5s...\n", mqttClient.state());
-            }
-        }
-        
-        mqttClient.loop(); 
-        yield();
-    }
-}
 
 
 
@@ -278,12 +241,7 @@ void printTelemetry(const char* detectedClass, float maxConfidence, bool pattern
         digitalWrite(RED_LED, HIGH);
     }
 
-    sprintf(msg, "{\"access\": %d}", patternDetected);
-    if(mqttClient.publish("iot/access", msg)){
-        Serial.println("[ÉXITO] Message sent successfully");
-    } else {
-        Serial.println("[ERROR] Couldn't send the message");
-    }
+    sendMessageToTelegram(patternDetected);
 
     Serial.println("----------------------------------------");
 
@@ -293,12 +251,28 @@ void printTelemetry(const char* detectedClass, float maxConfidence, bool pattern
 }
 
 
+
+void sendMessageToTelegram(bool access){
+    if(access){
+        if(bot.sendMessage(TELEGRAMCHATID, "¡ALERTA! Ha habido un acceso al sistema, ¿Fuiste Tú?", "")){
+            Serial.println("[SUCCESS] Message sent to Telegam");
+        }
+        else{
+            Serial.println("[ERROR] Couldn't send message to Telegram");
+        }
+    }
+    else{
+        if(bot.sendMessage(TELEGRAMCHATID, "¡ALERTA! Se ha producido un intento fallido de acceso al sistema ¿Has olvidado la contraseña?", "")){
+            Serial.println("[SUCCESS] Message sent to Telegam");
+        }
+        else{
+            Serial.println("[ERROR] Couldn't send message to Telegram");
+        }
+    }
+}
+
 void loop() {
 
-    if (!mqttClient.connected()) {
-        reconnect();
-    }
-    mqttClient.loop();
 
     bool currentButtonState = digitalRead(BUTTON_PIN);
 

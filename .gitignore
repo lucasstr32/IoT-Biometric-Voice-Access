@@ -1,9 +1,22 @@
-# Ignorar carpetas de datos generadas por Docker
-node-red-data/
+# === Docker & OS temporales ===
+.DS_Store
+Thumbs.db
+*.log
 
-# Ignorar datos de mosquitto pero mantener la carpeta de configuración
-mosquitto/data/
-mosquitto/log/
+# === Datos de los Contenedores (Volúmenes locales) ===
+# Ignoramos por completo las carpetas que contienen datos dinámicos o bases de datos
+/influxdb_data/
+/grafana-storage/
+/mosquitto/data/
+/mosquitto/log/
+
+# === Node-RED ===
+# Ignoramos los datos locales de Node-RED. Los flujos se deben exportar limpiamente.
+/node-red-data/
+
+# === Seguridad y Entorno ===
+# El archivo real con contraseñas se queda solo en tu máquina
+.env
 
 # Ignorar el archivo de credenciales locales de la placa
 **/data/config.json
